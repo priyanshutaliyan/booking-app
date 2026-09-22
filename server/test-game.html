@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Game Test</title>
+  <script src="socket.io.min.js"></script>
+</head>
+<body>
+  <h2>Tic-Tac-Toe Matchmaking Test</h2>
+  <input id="userId" placeholder="Enter User ID (any unique text)" style="width:300px" />
+  <button onclick="joinQueue()">Join Queue</button>
+  <p id="status">Not connected</p>
+  <div id="board" style="display:grid; grid-template-columns:repeat(3,60px); gap:5px;"></div>
+  <p id="log"></p>
+
+  <script>
+    const socket = io('http://localhost:5000');
+    let sessionId = null;
+    let mySymbol = null;
+    let myUserId = null;
+
+    socket.on('connect', () => {
+      document.getElementById('status').innerText = 'Connected: ' + socket.id;
+    });
+
+    function joinQueue() {
+      myUserId = document.getElementById('userId').value;
+      socket.emit('joinQueue', { userId: myUserId, bookingId: null });
+    }
+
+    socket.on('waitingForOpponent', () => {
+      document.getElementById('status').innerText = 'Waiting for opponent...';
+    });
+
+    socket.on('matchFound', (data) => {
+      sessionId = data.sessionId;
+      mySymbol = data.symbol;
+      socket.emit('joinSession', sessionId);
+      document.getElementById('status').innerText = 'Matched! You are: ' + mySymbol + ' | Session: ' + sessionId;
+      drawBoard(['', '', '', '', '', '', '', '', '']);
+    });
+
+    socket.on('opponentMoved', () => {
+      refreshBoard();
+    });
+
+    function drawBoard(board) {
+      const boardDiv = document.getElementById('board');
+      boardDiv.innerHTML = '';
+      board.forEach((cell, i) => {
+        const btn = document.createElement('button');
+        btn.innerText = cell || '-';
+        btn.style = 'width:60px;height:60px;font-size:24px;';
+        btn.onclick = () => makeMove(i);
+        boardDiv.appendChild(btn);
+      });
+    }
+
+    async function makeMove(position) {
+      const res = await fetch(`http://localhost:5000/api/games/${sessionId}/move`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ position, userId: myUserId }),
+      });
+      const data = await res.json();
+      if (data.message) {
+        document.getElementById('log').innerText = data.message;
+        return;
+      }
+      drawBoard(data.boardState);
+      socket.emit('moveMade', sessionId);
+      if (data.status === 'completed') {
+        document.getElementById('log').innerText = data.winnerId ? 'Winner: ' + data.winnerId : 'Draw!';
+      }
+    }
+
+    async function refreshBoard() {
+      const res = await fetch(`http://localhost:5000/api/games/${sessionId}`);
+      const data = await res.json();
+      drawBoard(data.boardState);
+      if (data.status === 'completed') {
+        document.getElementById('log').innerText = data.winnerId ? 'Winner: ' + data.winnerId : 'Draw!';
+      }
+    }
+  </script>
+</body>
+</html>
