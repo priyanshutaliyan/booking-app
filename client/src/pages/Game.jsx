@@ -1,250 +1,204 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { io } from "socket.io-client";
 import api from "../services/api";
 import Navbar from "../components/Navbar";
+import { useAuth } from "../context/AuthContext";
 
-const roleStyle = {
-  customer: "bg-blue-500/15 text-blue-300",
-  provider: "bg-purple-500/15 text-purple-300",
-  admin: "bg-yellow-500/15 text-yellow-300",
-};
+const SOCKET_URL = (
+  import.meta.env.VITE_API_URL || "http://localhost:5000/api"
+).replace(/\/api\/?$/, "");
 
-export default function AdminPanel() {
-  const [tab, setTab] = useState("users");
-  const [stats, setStats] = useState(null);
-  const [users, setUsers] = useState([]);
-  const [providers, setProviders] = useState([]);
-  const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
+export default function Game() {
+  const { user } = useAuth();
+  const socketRef = useRef(null);
+
+  const [phase, setPhase] = useState("idle");
+  const [session, setSession] = useState(null);
+  const [mySymbol, setMySymbol] = useState(null);
+  const [coins, setCoins] = useState(user?.appCoins ?? 0);
   const [error, setError] = useState("");
 
-  const loadAll = async () => {
-    setError("");
-    try {
-      const [sRes, uRes, pRes] = await Promise.all([
-        api.get("/admin/stats"),
-        api.get("/admin/users"),
-        api.get("/admin/providers"),
-      ]);
-      setStats(sRes.data);
-      setUsers(uRes.data);
-      setProviders(pRes.data);
-    } catch (err) {
-      setError(err.response?.data?.message || "Couldn't load data.");
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const coinRes = await api.get(`/games/coins/${user._id}`);
+        setCoins(coinRes.data.appCoins);
+
+        const statusRes = await api.get(`/games/status/${user._id}`);
+        if (statusRes.data) {
+          const s = statusRes.data;
+          setSession(s);
+          setMySymbol(s.player1Id === user._id || s.player1Id?._id === user._id ? "X" : "O");
+          setPhase("playing");
+          socketConnect();
+          socketRef.current?.emit("joinSession", s._id);
+        }
+      } catch (err) {}
+    };
+    init();
+  }, []);
+
+  const socketConnect = () => {
+    if (socketRef.current) return socketRef.current;
+    const socket = io(SOCKET_URL);
+    socketRef.current = socket;
+
+    socket.on("waitingForOpponent", () => {
+      setPhase("waiting");
+    });
+
+    socket.on("matchFound", ({ sessionId, symbol }) => {
+      setMySymbol(symbol);
+      socket.emit("joinSession", sessionId);
+      fetchSession(sessionId);
+      setPhase("playing");
+    });
+
+    socket.on("opponentMoved", () => {
+      if (session?._id) fetchSession(session._id);
+    });
+
+    return socket;
   };
 
   useEffect(() => {
-    loadAll();
+    return () => {
+      socketRef.current?.disconnect();
+      socketRef.current = null;
+    };
   }, []);
 
-  const toggleSuspend = async (u) => {
-    const action = u.isSuspended ? "unsuspend" : "suspend";
-    if (!window.confirm(`Are you sure you want to ${action} ${u.name}?`)) return;
+  const fetchSession = async (sessionId) => {
     try {
-      await api.put(`/admin/users/${u._id}/suspend`, {
-        isSuspended: !u.isSuspended,
-      });
-      loadAll();
+      const res = await api.get(`/games/${sessionId}`);
+      setSession(res.data);
+      if (res.data.status === "completed") {
+        setPhase("finished");
+        const coinRes = await api.get(`/games/coins/${user._id}`);
+        setCoins(coinRes.data.appCoins);
+      }
     } catch (err) {
-      setError(err.response?.data?.message || "Couldn't update the user.");
+      setError(err.response?.data?.message || "Couldn't load the game.");
     }
   };
 
-  const toggleVerify = async (p) => {
+  const startGame = () => {
+    setError("");
+    const socket = socketConnect();
+    socket.emit("joinQueue", { userId: user._id, bookingId: null });
+    setPhase("waiting");
+  };
+
+  const handleCellClick = async (position) => {
+    if (!session || session.status === "completed") return;
+    const turnId = session.currentTurn?._id || session.currentTurn;
+    if (turnId !== user._id) return;
+    if (session.boardState[position]) return;
+
     try {
-      await api.put(`/admin/providers/${p._id}/verify`, {
-        isVerified: !p.isVerified,
+      const res = await api.put(`/games/${session._id}/move`, {
+        position: position,
+        userId: user._id,
       });
-      loadAll();
+      setSession(res.data);
+      socketRef.current?.emit("moveMade", session._id);
+
+      if (res.data.status === "completed") {
+        setPhase("finished");
+        const coinRes = await api.get(`/games/coins/${user._id}`);
+        setCoins(coinRes.data.appCoins);
+      }
     } catch (err) {
-      setError(err.response?.data?.message || "Couldn't update the provider.");
+      setError(err.response?.data?.message || "Couldn't make that move.");
     }
   };
 
-  const filteredUsers = users.filter((u) => {
-    const q = search.toLowerCase();
-    return (
-      u.name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q)
-    );
-  });
+  const playAgain = () => {
+    setSession(null);
+    setMySymbol(null);
+    setPhase("idle");
+  };
 
-  const statCards = stats
-    ? [
-        { label: "Customers", value: stats.customers },
-        { label: "Providers", value: stats.providers },
-        { label: "Suspended", value: stats.suspended },
-        { label: "Bookings", value: stats.bookings },
-      ]
-    : [];
+  const isMyTurn =
+    session &&
+    session.status !== "completed" &&
+    (session.currentTurn?._id || session.currentTurn) === user._id;
+
+  const resultText = () => {
+    if (!session) return "";
+    if (session.winnerId === null) return "It's a draw! 🤝 +10 coins each";
+    const winnerId = session.winnerId?._id || session.winnerId;
+    return winnerId === user._id ? "You won! 🎉 +20 coins" : "You lost 😅 +5 coins";
+  };
 
   return (
     <div className="min-h-screen bg-[#0a0f1f] text-white">
       <Navbar />
 
-      <div className="mx-auto max-w-6xl px-6 py-8">
-        <h1 className="text-2xl font-bold">Admin Panel</h1>
-        <p className="mt-1 text-sm text-white/50">
-          Manage users and providers, and suspend accounts if needed
-        </p>
+      <div className="mx-auto max-w-md px-6 py-10 text-center">
+        <h1 className="text-2xl font-bold">Tic-Tac-Toe</h1>
+        <p className="mt-1 text-cyan-300 font-semibold">🪙 {coins} coins</p>
 
         {error && (
-          <p className="mt-6 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+          <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
             {error}
           </p>
         )}
 
-        {loading ? (
-          <p className="mt-10 text-white/60">Loading...</p>
-        ) : (
-          <>
-            <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-              {statCards.map((s) => (
-                <div
-                  key={s.label}
-                  className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-xl"
-                >
-                  <p className="text-sm text-white/60">{s.label}</p>
-                  <p className="mt-1 text-3xl font-bold text-cyan-300">{s.value}</p>
-                </div>
-              ))}
-            </div>
+        {phase === "idle" && (
+          <button
+            onClick={startGame}
+            className="mt-8 rounded-xl bg-gradient-to-r from-purple-500 to-cyan-500 px-6 py-3 font-semibold shadow-lg shadow-purple-500/30 hover:opacity-90 transition"
+          >
+            Find a Match
+          </button>
+        )}
 
-            <div className="mt-8 flex gap-3">
-              {[
-                { key: "users", label: "Users" },
-                { key: "providers", label: "Providers" },
-              ].map((t) => (
+        {phase === "waiting" && (
+          <p className="mt-8 text-white/70 animate-pulse">
+            Waiting for an opponent...
+          </p>
+        )}
+
+        {(phase === "playing" || phase === "finished") && session && (
+          <>
+            <p className="mt-4 text-sm text-white/60">
+              You are <span className="font-bold text-cyan-300">{mySymbol}</span>
+            </p>
+
+            {phase === "playing" && (
+              <p className="mt-1 text-sm">
+                {isMyTurn ? (
+                  <span className="text-green-300">Your turn</span>
+                ) : (
+                  <span className="text-white/50">Opponent's turn...</span>
+                )}
+              </p>
+            )}
+
+            <div className="mt-6 grid grid-cols-3 gap-2 mx-auto w-fit">
+              {session.boardState.map((cell, i) => (
                 <button
-                  key={t.key}
-                  onClick={() => setTab(t.key)}
-                  className={`rounded-full border px-5 py-2 text-sm transition ${
-                    tab === t.key
-                      ? "border-transparent bg-gradient-to-r from-purple-500 to-cyan-500 font-semibold"
-                      : "border-white/15 bg-white/5 text-white/80 hover:bg-white/10"
-                  }`}
+                  key={i}
+                  onClick={() => handleCellClick(i)}
+                  disabled={phase !== "playing" || !isMyTurn || !!cell}
+                  className="h-20 w-20 rounded-xl border border-white/10 bg-white/5 text-3xl font-bold flex items-center justify-center hover:bg-white/10 transition disabled:cursor-not-allowed"
                 >
-                  {t.label}
+                  {cell === "X" && <span className="text-purple-400">X</span>}
+                  {cell === "O" && <span className="text-cyan-400">O</span>}
                 </button>
               ))}
             </div>
 
-            {tab === "users" && (
+            {phase === "finished" && (
               <div className="mt-6">
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search by name or email"
-                  className="w-full rounded-xl border border-white/10 bg-white/90 px-4 py-3 text-black placeholder-black/40 outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/30 sm:max-w-sm"
-                />
-
-                <div className="mt-4 space-y-3">
-                  {filteredUsers.length === 0 && (
-                    <p className="text-white/60">No users found.</p>
-                  )}
-
-                  {filteredUsers.map((u) => (
-                    <div
-                      key={u._id}
-                      className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <div>
-                        <p className="font-semibold">{u.name}</p>
-                        <p className="text-sm text-white/60">{u.email}</p>
-                        {u.phone && (
-                          <p className="text-xs text-white/40">📞 {u.phone}</p>
-                        )}
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-3">
-                        <span
-                          className={`rounded-full px-3 py-1 text-xs font-semibold capitalize ${
-                            roleStyle[u.role] || "bg-white/10"
-                          }`}
-                        >
-                          {u.role}
-                        </span>
-
-                        <span
-                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                            u.isSuspended
-                              ? "bg-red-500/15 text-red-300"
-                              : "bg-green-500/15 text-green-300"
-                          }`}
-                        >
-                          {u.isSuspended ? "Suspended" : "Active"}
-                        </span>
-
-                        {u.role !== "admin" && (
-                          <button
-                            onClick={() => toggleSuspend(u)}
-                            className={`rounded-xl border px-4 py-1.5 text-sm transition ${
-                              u.isSuspended
-                                ? "border-green-400/40 text-green-300 hover:bg-green-500/10"
-                                : "border-red-400/40 text-red-300 hover:bg-red-500/10"
-                            }`}
-                          >
-                            {u.isSuspended ? "Unsuspend" : "Suspend"}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {tab === "providers" && (
-              <div className="mt-6 space-y-3">
-                {providers.length === 0 && (
-                  <p className="text-white/60">No provider services yet.</p>
-                )}
-
-                {providers.map((p) => (
-                  <div
-                    key={p._id}
-                    className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div>
-                      <p className="font-semibold">
-                        {p.serviceName}{" "}
-                        <span className="text-sm font-normal text-white/50">
-                          • {p.category?.name}
-                        </span>
-                      </p>
-                      <p className="text-sm text-white/60">
-                        by {p.userId?.name} ({p.userId?.email})
-                      </p>
-                      <p className="text-sm text-cyan-300">₹{p.pricePerService}</p>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-3">
-                      {p.userId?.isSuspended && (
-                        <span className="rounded-full bg-red-500/15 px-3 py-1 text-xs font-semibold text-red-300">
-                          Owner suspended
-                        </span>
-                      )}
-
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                          p.isVerified
-                            ? "bg-green-500/15 text-green-300"
-                            : "bg-yellow-500/15 text-yellow-300"
-                        }`}
-                      >
-                        {p.isVerified ? "Verified" : "Not verified"}
-                      </span>
-
-                      <button
-                        onClick={() => toggleVerify(p)}
-                        className="rounded-xl border border-white/20 px-4 py-1.5 text-sm transition hover:bg-white/10"
-                      >
-                        {p.isVerified ? "Unverify" : "Verify"}
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                <p className="text-lg font-semibold">{resultText()}</p>
+                <button
+                  onClick={playAgain}
+                  className="mt-4 rounded-xl border border-white/20 px-5 py-2 hover:bg-white/10 transition"
+                >
+                  Play Again
+                </button>
               </div>
             )}
           </>
