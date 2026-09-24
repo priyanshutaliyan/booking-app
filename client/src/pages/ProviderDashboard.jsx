@@ -63,6 +63,15 @@ export default function ProviderDashboard() {
     }
   };
 
+  const toggleServiceActive = async (providerId, current) => {
+    try {
+      await api.put(`/providers/${providerId}/active`, { isActive: !current });
+      loadData();
+    } catch (err) {
+      setError(err.response?.data?.message || "Couldn't update the service status.");
+    }
+  };
+
   const serviceName = (providerId) =>
     profiles.find((p) => p._id === providerId)?.serviceName || "Service";
 
@@ -72,7 +81,7 @@ export default function ProviderDashboard() {
 
       <div className="mx-auto max-w-4xl px-6 py-8">
         <h1 className="text-2xl font-bold">Provider Panel</h1>
-        <p className="mt-1 text-sm text-white/50">Manage the bookings for your services</p>
+        <p className="mt-1 text-sm text-white/50">Manage your services and bookings</p>
 
         {error && (
           <p className="mt-6 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
@@ -88,66 +97,98 @@ export default function ProviderDashboard() {
               You haven't added any services yet.
             </p>
           </div>
-        ) : bookings.length === 0 ? (
-          <div className="mt-10 rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
-            <p className="text-white/70">No bookings yet.</p>
-          </div>
         ) : (
-          <div className="mt-8 space-y-4">
-            {bookings.map((b) => (
-              <div
-                key={b._id}
-                className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between"
-              >
-                <div>
-                  <h2 className="text-lg font-semibold">
-                    {serviceName(b.providerId)}
-                  </h2>
-                  <p className="mt-1 text-sm text-white/80">
-                    👤 {b.customerId?.name || "Customer"}
-                    {b.customerId?.phone ? ` • ${b.customerId.phone}` : ""}
-                  </p>
-                  <p className="mt-1 text-sm text-white/70">
-                    📅 {b.slotDate} • ⏰ {b.slotTime}
-                  </p>
-                  {b.address && (
-                    <p className="mt-1 text-sm text-white/50">📍 {b.address}</p>
-                  )}
-                  <p className="mt-1 text-sm text-cyan-300">₹{b.price}</p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <span
-                    className={`rounded-full px-3 py-1 text-sm font-semibold capitalize ${
-                      statusStyle[b.status] || "bg-white/10 text-white"
+          <>
+            <div className="mt-8 space-y-3">
+              <h2 className="text-lg font-semibold">Your Services</h2>
+              {profiles.map((p) => (
+                <div
+                  key={p._id}
+                  className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 p-4"
+                >
+                  <div>
+                    <p className="font-semibold">{p.serviceName}</p>
+                    <p className="text-xs text-white/50">₹{p.pricePerService}</p>
+                  </div>
+                  <button
+                    onClick={() => toggleServiceActive(p._id, p.isActive)}
+                    className={`rounded-full px-4 py-1.5 text-sm font-semibold transition ${
+                      p.isActive
+                        ? "bg-green-500/15 text-green-300 hover:bg-green-500/25"
+                        : "bg-white/10 text-white/50 hover:bg-white/20"
                     }`}
                   >
-                    {b.status}
-                  </span>
-
-                  {nextAction[b.status] && (
-                    <button
-                      onClick={() =>
-                        updateStatus(b._id, nextAction[b.status].status)
-                      }
-                      className="rounded-xl bg-gradient-to-r from-purple-500 to-cyan-500 px-4 py-1.5 text-sm font-semibold transition hover:opacity-90"
-                    >
-                      {nextAction[b.status].label}
-                    </button>
-                  )}
-
-                  {b.status === "pending" && (
-                    <button
-                      onClick={() => updateStatus(b._id, "cancelled")}
-                      className="rounded-xl border border-red-400/40 px-4 py-1.5 text-sm text-red-300 transition hover:bg-red-500/10"
-                    >
-                      Reject
-                    </button>
-                  )}
+                    {p.isActive ? "🟢 Active" : "⚪ Inactive"}
+                  </button>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+
+            <div className="mt-10">
+              <h2 className="text-lg font-semibold">Bookings</h2>
+              {bookings.length === 0 ? (
+                <div className="mt-4 rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
+                  <p className="text-white/70">No bookings yet.</p>
+                </div>
+              ) : (
+                <div className="mt-4 space-y-4">
+                  {bookings.map((b) => (
+                    <div
+                      key={b._id}
+                      className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div>
+                        <h2 className="text-lg font-semibold">
+                          {serviceName(b.providerId)}
+                        </h2>
+                        <p className="mt-1 text-sm text-white/80">
+                          👤 {b.customerId?.name || "Customer"}
+                          {b.customerId?.phone ? ` • ${b.customerId.phone}` : ""}
+                        </p>
+                        <p className="mt-1 text-sm text-white/70">
+                          📅 {b.slotDate} • ⏰ {b.slotTime}
+                        </p>
+                        {b.address && (
+                          <p className="mt-1 text-sm text-white/50">📍 {b.address}</p>
+                        )}
+                        <p className="mt-1 text-sm text-cyan-300">₹{b.price}</p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span
+                          className={`rounded-full px-3 py-1 text-sm font-semibold capitalize ${
+                            statusStyle[b.status] || "bg-white/10 text-white"
+                          }`}
+                        >
+                          {b.status}
+                        </span>
+
+                        {nextAction[b.status] && (
+                          <button
+                            onClick={() =>
+                              updateStatus(b._id, nextAction[b.status].status)
+                            }
+                            className="rounded-xl bg-gradient-to-r from-purple-500 to-cyan-500 px-4 py-1.5 text-sm font-semibold transition hover:opacity-90"
+                          >
+                            {nextAction[b.status].label}
+                          </button>
+                        )}
+
+                        {b.status === "pending" && (
+                          <button
+                            onClick={() => updateStatus(b._id, "cancelled")}
+                            className="rounded-xl border border-red-400/40 px-4 py-1.5 text-sm text-red-300 transition hover:bg-red-500/10"
+                          >
+                            Reject
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
         )}
       </div>
     </div>

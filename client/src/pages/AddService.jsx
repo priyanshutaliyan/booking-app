@@ -24,7 +24,6 @@ export default function AddService() {
     serviceName: "",
     description: "",
     pricePerService: "",
-    date: "",
   });
   const [slots, setSlots] = useState([]);
   const [error, setError] = useState("");
@@ -55,10 +54,6 @@ export default function AddService() {
     e.preventDefault();
     setError("");
 
-    if (!form.date) {
-      setError("Please select an available date");
-      return;
-    }
     if (slots.length === 0) {
       setError("Please select at least one time slot");
       return;
@@ -72,7 +67,7 @@ export default function AddService() {
         serviceName: form.serviceName,
         description: form.description,
         pricePerService: Number(form.pricePerService),
-        availability: [{ date: form.date, timeSlots: slots }],
+        timeSlots: slots,
       });
       setSuccess(true);
     } catch (err) {
@@ -88,7 +83,6 @@ export default function AddService() {
       serviceName: "",
       description: "",
       pricePerService: "",
-      date: "",
     });
     setSlots([]);
     setSuccess(false);
@@ -193,19 +187,9 @@ export default function AddService() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm text-white/70">Available date</label>
-              <input
-                name="date"
-                type="date"
-                value={form.date}
-                onChange={handleChange}
-                className={inputClass}
-                required
-              />
-            </div>
-
-            <div>
-              <label className="mb-2 block text-sm text-white/70">Time slots</label>
+              <label className="mb-2 block text-sm text-white/70">
+                Time slots you're usually available
+              </label>
               <div className="flex flex-wrap gap-2">
                 {ALL_SLOTS.map((slot) => (
                   <button

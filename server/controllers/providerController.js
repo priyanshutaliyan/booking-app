@@ -8,7 +8,7 @@ const createProviderProfile = async (req, res) => {
       serviceName,
       description,
       pricePerService,
-      availability,
+      timeSlots,
     } = req.body;
 
     const profile = await ProviderProfile.create({
@@ -17,7 +17,7 @@ const createProviderProfile = async (req, res) => {
       serviceName,
       description,
       pricePerService,
-      availability,
+      timeSlots,
     });
 
     return res.status(201).json(profile);
@@ -29,7 +29,7 @@ const createProviderProfile = async (req, res) => {
 const getProvidersByCategory = async (req, res) => {
   try {
     const { category } = req.params;
-    const providers = await ProviderProfile.find({ category })
+    const providers = await ProviderProfile.find({ category, isActive: true })
       .populate('userId', 'name phone')
       .populate('category', 'name');
 
@@ -70,9 +70,31 @@ const getProviderById = async (req, res) => {
   }
 };
 
+const toggleActive = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isActive } = req.body;
+
+    const profile = await ProviderProfile.findByIdAndUpdate(
+      id,
+      { isActive },
+      { new: true }
+    );
+
+    if (!profile) {
+      return res.status(404).json({ message: 'Provider profile not found' });
+    }
+
+    return res.status(200).json(profile);
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   createProviderProfile,
   getProvidersByCategory,
   getProvidersByUser,
   getProviderById,
+  toggleActive,
 };

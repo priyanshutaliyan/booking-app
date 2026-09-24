@@ -20,12 +20,11 @@ const providerProfileSchema = new mongoose.Schema({
     type: Number,
     required: true,
   },
-  availability: [
-    {
-      date: String,
-      timeSlots: [String],
-    },
-  ],
+  timeSlots: [String],
+  isActive: {
+    type: Boolean,
+    default: true,
+  },
   isVerified: {
     type: Boolean,
     default: false,

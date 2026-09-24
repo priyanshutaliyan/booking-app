@@ -17,23 +17,17 @@ export default function Book() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
 
+  const todayStr = new Date().toISOString().split("T")[0];
+
   useEffect(() => {
     api
       .get(`/providers/${providerId}`)
-      .then((res) => {
-        setProvider(res.data);
-        const first = res.data.availability?.[0];
-        if (first) setSelectedDate(first.date);
-      })
+      .then((res) => setProvider(res.data))
       .catch((err) =>
         setError(err.response?.data?.message || "Couldn't load this provider.")
       )
       .finally(() => setLoading(false));
   }, [providerId]);
-
-  const slotsForDate =
-    provider?.availability?.find((a) => a.date === selectedDate)?.timeSlots ||
-    [];
 
   const handleConfirm = async () => {
     setError("");
@@ -80,10 +74,13 @@ export default function Book() {
           </p>
         ) : success ? (
           <div className="rounded-3xl border border-white/10 bg-white/5 p-8 text-center backdrop-blur-xl">
-            <p className="text-5xl">✅</p>
-            <h1 className="mt-4 text-2xl font-bold">Booking Confirmed</h1>
+            <p className="text-5xl">⏳</p>
+            <h1 className="mt-4 text-2xl font-bold">Booking Requested</h1>
             <p className="mt-2 text-white/70">
               {provider.serviceName} • {selectedDate} • {selectedTime}
+            </p>
+            <p className="mt-2 text-sm text-yellow-300">
+              Waiting for the provider to accept your request.
             </p>
             <div className="mt-6 flex justify-center gap-3">
               <Link
@@ -93,10 +90,10 @@ export default function Book() {
                 Browse More Services
               </Link>
               <Link
-                to="/dashboard"
+                to="/my-bookings"
                 className="rounded-xl bg-gradient-to-r from-purple-500 to-cyan-500 px-5 py-2.5 font-semibold transition hover:opacity-90"
               >
-                Go to Dashboard
+                View My Bookings
               </Link>
             </div>
           </div>
@@ -122,28 +119,17 @@ export default function Book() {
             )}
 
             <p className="mt-6 text-sm text-white/70">Select a date</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {provider.availability?.map((a) => (
-                <button
-                  key={a.date}
-                  onClick={() => {
-                    setSelectedDate(a.date);
-                    setSelectedTime("");
-                  }}
-                  className={`rounded-lg border px-4 py-2 text-sm transition ${
-                    selectedDate === a.date
-                      ? "border-transparent bg-gradient-to-r from-purple-500 to-cyan-500 font-semibold"
-                      : "border-white/15 bg-white/5 hover:bg-white/10"
-                  }`}
-                >
-                  {a.date}
-                </button>
-              ))}
-            </div>
+            <input
+              type="date"
+              min={todayStr}
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="mt-2 w-full rounded-xl border border-white/10 bg-white/90 px-4 py-3 text-black outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/30"
+            />
 
             <p className="mt-6 text-sm text-white/70">Select a time slot</p>
             <div className="mt-2 flex flex-wrap gap-2">
-              {slotsForDate.map((slot) => (
+              {(provider.timeSlots || []).map((slot) => (
                 <button
                   key={slot}
                   onClick={() => setSelectedTime(slot)}
@@ -171,7 +157,7 @@ export default function Book() {
               disabled={submitting}
               className="mt-8 w-full rounded-xl bg-gradient-to-r from-purple-500 to-cyan-500 py-3 font-semibold text-white shadow-lg shadow-purple-500/30 transition hover:opacity-90 disabled:opacity-50"
             >
-              {submitting ? "Confirming..." : "Confirm Booking"}
+              {submitting ? "Sending request..." : "Request Booking"}
             </button>
           </div>
         )}
